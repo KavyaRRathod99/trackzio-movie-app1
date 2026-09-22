@@ -1,176 +1,131 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
+
+const {
+  searchMovies,
+  getMovieDetails,
+} = require("./services/movieService");
 
 const app = express();
 
+const PORT = 5000;
+
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Test route
+
+// Home route
 app.get("/", (req, res) => {
   res.json({
-    message: "Trackzio Movie Backend is running!",
+    success: true,
+    message: "Trackzio Movie App Backend is running!",
+    api: "TVMaze",
   });
 });
 
-// Search movies/shows
-app.get("/api/search", async (req, res) => {
-  const query = req.query.query;
 
-  // Check empty search
-  if (!query || !query.trim()) {
-    return res.status(400).json({
-      message: "Please enter a search term.",
-    });
-  }
-
+// Search TV shows
+app.get("/api/movies", async (req, res) => {
   try {
-    const response = await axios.get(
-      `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(
-        query.trim()
-      )}`,
-      {
-        timeout: 10000,
-      }
-    );
+    const search = req.query.search || "";
 
-    // Make sure API returned an array
-    if (!Array.isArray(response.data)) {
-      return res.status(502).json({
-        message: "Unexpected response from movie service.",
+    if (!search.trim()) {
+      return res.json({
+        success: true,
+        results: [],
+        totalResults: 0,
+        hasMore: false,
+        message: "Please enter a movie or show name.",
       });
     }
 
-    const results = response.data
-      .filter((item) => item && item.show)
-      .map((item) => {
-        const show = item.show;
-
-        return {
-          id: show.id,
-          title: show.name || "Unknown Title",
-          type: show.type || "Unknown",
-          language: show.language || null,
-          genres: Array.isArray(show.genres)
-            ? show.genres
-            : [],
-          rating: show.rating?.average ?? null,
-          premiered: show.premiered || null,
-          image: show.image?.medium || null,
-          summary: show.summary || "",
-        };
-      });
+    const movieData = await searchMovies(search);
 
     res.json({
-      results: results,
+      success: true,
+      ...movieData,
     });
-  } catch (error) {
-    console.error("TVMaze search error:", error.message);
 
-    // Request took too long
+  } catch (error) {
+    console.error(
+      "TVMaze Search Error:",
+      error.response?.data || error.message
+    );
+
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        success: false,
+        message: "Too many requests. Please wait and try again.",
+      });
+    }
+
     if (error.code === "ECONNABORTED") {
       return res.status(504).json({
-        message: "Movie service is taking too long to respond.",
+        success: false,
+        message: "TVMaze is taking too long to respond.",
       });
     }
 
-    // API/server unavailable
-    if (error.response) {
-      return res.status(502).json({
-        message: "Movie service is temporarily unavailable.",
-      });
-    }
-
-    // Network error
-    return res.status(503).json({
-      message: "Unable to connect to movie service.",
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch shows right now. Please try again.",
     });
   }
 });
 
-// Get details of one movie/show
+
+// Get show details
 app.get("/api/movies/:id", async (req, res) => {
-  const { id } = req.params;
-
-  // Check ID
-  if (!id || isNaN(Number(id))) {
-    return res.status(400).json({
-      message: "Invalid movie ID.",
-    });
-  }
-
   try {
-    const response = await axios.get(
-      `https://api.tvmaze.com/shows/${id}`,
-      {
-        timeout: 10000,
-      }
-    );
+    const id = Number(req.params.id);
 
-    const show = response.data;
-
-    // Check unexpected response
-    if (!show || !show.id) {
-      return res.status(502).json({
-        message: "Unexpected response from movie service.",
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid show ID.",
       });
     }
+
+    const movie = await getMovieDetails(id);
 
     res.json({
-      id: show.id,
-      title: show.name || "Unknown Title",
-      type: show.type || "Unknown",
-      language: show.language || null,
-      genres: Array.isArray(show.genres)
-        ? show.genres
-        : [],
-      rating: show.rating?.average ?? null,
-      premiered: show.premiered || null,
-      ended: show.ended || null,
-      status: show.status || null,
-      runtime: show.runtime || null,
-      image:
-        show.image?.original ||
-        show.image?.medium ||
-        null,
-      summary: show.summary || "",
-      officialSite: show.officialSite || null,
+      success: true,
+      movie,
     });
+
   } catch (error) {
-    console.error("TVMaze details error:", error.message);
+    console.error(
+      "TVMaze Details Error:",
+      error.response?.data || error.message
+    );
 
-    // Request took too long
-    if (error.code === "ECONNABORTED") {
-      return res.status(504).json({
-        message: "Movie service is taking too long to respond.",
-      });
-    }
-
-    // Movie/show does not exist
     if (error.response?.status === 404) {
       return res.status(404).json({
-        message: "Movie not found.",
+        success: false,
+        message: "Show not found.",
       });
     }
 
-    // API/server unavailable
-    if (error.response) {
-      return res.status(502).json({
-        message: "Movie service is temporarily unavailable.",
-      });
-    }
-
-    // Network error
-    return res.status(503).json({
-      message: "Unable to connect to movie service.",
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch show details right now.",
     });
   }
 });
 
-// Start server
-const PORT = 5000;
 
+// Unknown route
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API route not found.",
+  });
+});
+
+
+// Start server
 app.listen(PORT, () => {
   console.log(
     `Backend server running on http://localhost:${PORT}`

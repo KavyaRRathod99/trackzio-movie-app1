@@ -1,515 +1,1226 @@
-import { useState, useRef } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import "./App.css";
 
+const API_URL = "http://localhost:5000/api";
+
 function App() {
-  const [search, setSearch] = useState("");
+  // ==========================================
+  // STATE
+  // ==========================================
+
   const [movies, setMovies] = useState([]);
-  const [selectedMovie, setSelectedMovie] = useState(null);
+  const [search, setSearch] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [sortOption, setSortOption] = useState("default");
+  const [selectedMovie, setSelectedMovie] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
-  // Number of movies shown at one time
-  const [visibleCount, setVisibleCount] = useState(6);
+  const [sortBy, setSortBy] = useState("default");
 
-  // Keeps track of the latest search request
-  const searchRequestId = useRef(0);
+  // Filters
+  const [genreFilter, setGenreFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [languageFilter, setLanguageFilter] = useState("all");
+  const [ratingFilter, setRatingFilter] = useState("all");
 
-  // Load wishlist from browser storage
+  const [showWishlist, setShowWishlist] = useState(false);
+
+  // ==========================================
+  // LOAD WISHLIST FROM LOCAL STORAGE
+  // ==========================================
+
   const [wishlist, setWishlist] = useState(() => {
-    const savedWishlist = localStorage.getItem("movieWishlist");
+    try {
+      const savedWishlist = localStorage.getItem(
+        "trackzio-wishlist"
+      );
 
-    return savedWishlist ? JSON.parse(savedWishlist) : [];
+      if (savedWishlist) {
+        return JSON.parse(savedWishlist);
+      }
+
+      return [];
+    } catch (error) {
+      console.error("Wishlist loading error:", error);
+      return [];
+    }
   });
 
-  const categories = [
-    "All",
-    "Drama",
-    "Comedy",
-    "Action",
-    "Science-Fiction",
-    "Thriller",
-  ];
+  // ==========================================
+  // SAVE WISHLIST TO LOCAL STORAGE
+  // ==========================================
 
-  // Search movies/shows
-  const handleSearch = async () => {
-    if (!search.trim()) {
-      setError("Please enter a movie name.");
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "trackzio-wishlist",
+        JSON.stringify(wishlist)
+      );
+    } catch (error) {
+      console.error("Wishlist saving error:", error);
+    }
+  }, [wishlist]);
+
+  // ==========================================
+  // SEARCH SHOWS
+  // ==========================================
+
+  const fetchMovies = async (searchTerm) => {
+    if (!searchTerm.trim()) {
       setMovies([]);
+      setError("");
       return;
     }
 
-    // Create a new ID for every search
-    const currentRequestId = ++searchRequestId.current;
-
-    setLoading(true);
-    setError("");
-    setSelectedMovie(null);
-    setSelectedCategory("All");
-    setSortOption("default");
-    setVisibleCount(6);
-
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/search?query=${encodeURIComponent(
-          search
-        )}`
+      setLoading(true);
+      setError("");
+      setSelectedMovie(null);
+
+      const response = await axios.get(
+        `${API_URL}/movies`,
+        {
+          params: {
+            search: searchTerm.trim(),
+          },
+          timeout: 12000,
+        }
       );
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch movies");
+      if (response.data.success === false) {
+        throw new Error(
+          response.data.message ||
+            "Unable to load shows."
+        );
       }
 
-      const data = await response.json();
+      const results = response.data.results || [];
 
-      // Ignore this response if a newer search has already started
-      if (currentRequestId !== searchRequestId.current) {
-        return;
-      }
+      setMovies(results);
 
-      setMovies(data.results || []);
+    } catch (err) {
+      console.error(
+        "Frontend Search Error:",
+        err
+      );
 
-      if (!data.results || data.results.length === 0) {
-        setError("No results found.");
-      }
-    } catch (error) {
-      // Ignore errors from older searches
-      if (currentRequestId !== searchRequestId.current) {
-        return;
-      }
-
-      setError("Could not connect to the backend.");
       setMovies([]);
-    } finally {
-      // Only stop loading for the latest search
-      if (currentRequestId === searchRequestId.current) {
-        setLoading(false);
+
+      if (err.response?.status === 429) {
+        setError(
+          "Too many requests. Please wait a moment and try again."
+        );
+      } else if (
+        err.code === "ECONNABORTED"
+      ) {
+        setError(
+          "The server is taking too long to respond. Please try again."
+        );
+      } else {
+        setError(
+          "Unable to load shows. Please make sure the backend server is running."
+        );
       }
+
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Get details
-  const handleMovieClick = async (id) => {
-    setDetailsLoading(true);
-    setError("");
+  // ==========================================
+  // SEARCH BUTTON
+  // ==========================================
 
+  const handleSearch = () => {
+    setShowWishlist(false);
+    setSelectedMovie(null);
+
+    setSortBy("default");
+
+    // Reset filters for new search
+    setGenreFilter("all");
+    setStatusFilter("all");
+    setLanguageFilter("all");
+    setRatingFilter("all");
+
+    fetchMovies(search);
+  };
+
+  // ==========================================
+  // CLEAR SEARCH
+  // ==========================================
+
+  const handleClearSearch = () => {
+    setSearch("");
+    setMovies([]);
+    setError("");
+    setSelectedMovie(null);
+
+    setSortBy("default");
+
+    setGenreFilter("all");
+    setStatusFilter("all");
+    setLanguageFilter("all");
+    setRatingFilter("all");
+
+    setShowWishlist(false);
+  };
+
+  // ==========================================
+  // VIEW DETAILS
+  // ==========================================
+
+  const handleViewDetails = async (movie) => {
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/movies/${id}`
+      setDetailsLoading(true);
+      setError("");
+
+      const response = await axios.get(
+        `${API_URL}/movies/${movie.id}`,
+        {
+          timeout: 15000,
+        }
       );
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch details");
+      if (
+        response.data.success === false ||
+        !response.data.movie
+      ) {
+        throw new Error(
+          response.data.message ||
+            "Unable to load show details."
+        );
       }
 
-      const data = await response.json();
+      setSelectedMovie(
+        response.data.movie
+      );
 
-      setSelectedMovie(data);
-    } catch (error) {
-      setError("Could not load movie details.");
+      // Scroll to details section
+      setTimeout(() => {
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "smooth",
+        });
+      }, 100);
+
+    } catch (err) {
+      console.error(
+        "Details Error:",
+        err
+      );
+
+      if (
+        err.code === "ECONNABORTED"
+      ) {
+        setError(
+          "The server is taking too long to respond. Please try again."
+        );
+      } else if (
+        err.response?.status === 404
+      ) {
+        setError(
+          "Show details were not found."
+        );
+      } else {
+        setError(
+          "Unable to load show details. Please try again."
+        );
+      }
+
     } finally {
       setDetailsLoading(false);
     }
   };
 
-  // Close details
-  const closeDetails = () => {
-    setSelectedMovie(null);
-  };
+  // ==========================================
+  // ADD TO WISHLIST
+  // ==========================================
 
-  // Add/remove wishlist
-  const toggleWishlist = (movie) => {
-    const alreadySaved = wishlist.some(
+  const addToWishlist = (movie) => {
+    const alreadyAdded = wishlist.some(
       (item) => item.id === movie.id
     );
 
-    let updatedWishlist;
-
-    if (alreadySaved) {
-      updatedWishlist = wishlist.filter(
-        (item) => item.id !== movie.id
-      );
-    } else {
-      updatedWishlist = [...wishlist, movie];
+    if (alreadyAdded) {
+      return;
     }
 
-    setWishlist(updatedWishlist);
+    setWishlist([
+      ...wishlist,
+      movie,
+    ]);
+  };
 
-    localStorage.setItem(
-      "movieWishlist",
-      JSON.stringify(updatedWishlist)
+  // ==========================================
+  // REMOVE FROM WISHLIST
+  // ==========================================
+
+  const removeFromWishlist = (movieId) => {
+    setWishlist(
+      wishlist.filter(
+        (movie) => movie.id !== movieId
+      )
+    );
+
+    if (
+      selectedMovie &&
+      selectedMovie.id === movieId
+    ) {
+      setSelectedMovie(null);
+    }
+  };
+
+  // ==========================================
+  // CHECK WISHLIST
+  // ==========================================
+
+  const isInWishlist = (movieId) => {
+    return wishlist.some(
+      (movie) => movie.id === movieId
     );
   };
 
-  // Filter by category
+  // ==========================================
+  // AVAILABLE GENRES
+  // ==========================================
+
+  const availableGenres = [
+    ...new Set(
+      movies.flatMap(
+        (movie) =>
+          movie.genres || []
+      )
+    ),
+  ].sort();
+
+  // ==========================================
+  // AVAILABLE STATUSES
+  // ==========================================
+
+  const availableStatuses = [
+    ...new Set(
+      movies
+        .map(
+          (movie) =>
+            movie.status
+        )
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  // ==========================================
+  // AVAILABLE LANGUAGES
+  // ==========================================
+
+  const availableLanguages = [
+    ...new Set(
+      movies
+        .map(
+          (movie) =>
+            movie.language
+        )
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  // ==========================================
+  // APPLY FILTERS
+  // ==========================================
+
+  const getFilteredMovies = (
+    movieList
+  ) => {
+    return movieList.filter(
+      (movie) => {
+
+        // Genre
+        if (
+          genreFilter !== "all" &&
+          !(movie.genres || []).includes(
+            genreFilter
+          )
+        ) {
+          return false;
+        }
+
+        // Status
+        if (
+          statusFilter !== "all" &&
+          movie.status !== statusFilter
+        ) {
+          return false;
+        }
+
+        // Language
+        if (
+          languageFilter !== "all" &&
+          movie.language !== languageFilter
+        ) {
+          return false;
+        }
+
+        // Rating
+        if (
+          ratingFilter !== "all"
+        ) {
+          const rating =
+            Number(movie.rating) || 0;
+
+          if (
+            rating <
+            Number(ratingFilter)
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+    );
+  };
+
+  // ==========================================
+  // SORT MOVIES
+  // ==========================================
+
+  const getSortedMovies = (
+    movieList
+  ) => {
+    const sortedMovies = [
+      ...movieList,
+    ];
+
+    if (sortBy === "rating") {
+      sortedMovies.sort(
+        (a, b) =>
+          (Number(b.rating) || 0) -
+          (Number(a.rating) || 0)
+      );
+    }
+
+    if (sortBy === "release") {
+      sortedMovies.sort(
+        (a, b) =>
+          (Number(b.year) || 0) -
+          (Number(a.year) || 0)
+      );
+    }
+
+    if (sortBy === "title") {
+      sortedMovies.sort(
+        (a, b) =>
+          (a.title || "").localeCompare(
+            b.title || ""
+          )
+      );
+    }
+
+    return sortedMovies;
+  };
+
+  // ==========================================
+  // FILTER + SORT
+  // ==========================================
+
   const filteredMovies =
-    selectedCategory === "All"
-      ? movies
-      : movies.filter((movie) =>
-          movie.genres?.includes(selectedCategory)
+    getFilteredMovies(movies);
+
+  const moviesToDisplay =
+    showWishlist
+      ? wishlist
+      : getSortedMovies(
+          filteredMovies
         );
 
-  // Sort results
-  const sortedMovies = [...filteredMovies].sort((a, b) => {
-    if (sortOption === "rating-high") {
-      return (b.rating || 0) - (a.rating || 0);
-    }
+  // ==========================================
+  // RESET FILTERS
+  // ==========================================
 
-    if (sortOption === "rating-low") {
-      return (a.rating || 0) - (b.rating || 0);
-    }
+  const clearFilters = () => {
+    setGenreFilter("all");
+    setStatusFilter("all");
+    setLanguageFilter("all");
+    setRatingFilter("all");
+  };
 
-    if (sortOption === "title-az") {
-      return a.title.localeCompare(b.title);
-    }
-
-    if (sortOption === "title-za") {
-      return b.title.localeCompare(a.title);
-    }
-
-    return 0;
-  });
-
-  // Show only some results at first
-  const visibleMovies = sortedMovies.slice(0, visibleCount);
+  // ==========================================
+  // RENDER
+  // ==========================================
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>🎬 Movie Discovery</h1>
-        <p>Search and discover your favorite movies and shows</p>
+
+      {/* ======================================
+          NAVBAR
+      ====================================== */}
+
+      <header className="navbar">
+
+        <h1>
+          🎬 Show Discovery
+        </h1>
+
+        <nav>
+
+          <button
+            onClick={() => {
+              setShowWishlist(false);
+              setSelectedMovie(null);
+            }}
+          >
+            Home
+          </button>
+
+          <button
+            onClick={() => {
+              setShowWishlist(true);
+              setSelectedMovie(null);
+              setError("");
+            }}
+          >
+            ❤️ Wishlist ({wishlist.length})
+          </button>
+
+        </nav>
+
       </header>
 
-      <main className="container">
-        {/* Search */}
-        <div className="search-box">
-          <input
-            type="text"
-            placeholder="Search for a movie or show..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleSearch();
-              }
-            }}
-          />
+      <main>
 
-          <button onClick={handleSearch}>Search</button>
-        </div>
+        {/* ====================================
+            HERO / SEARCH
+        ==================================== */}
 
-        {/* Wishlist count */}
-        <div className="wishlist-count">
-          ❤️ Wishlist: {wishlist.length}
-        </div>
+        {!showWishlist && (
+          <section className="hero">
 
-        {/* Categories and Sorting */}
-        {!loading && movies.length > 0 && (
-          <div className="controls-section">
-            <div className="category-section">
-              <h3>Explore by Category</h3>
+            <h2>
+              Discover Your Next Show
+            </h2>
 
-              <div className="category-buttons">
-                {categories.map((category) => (
-                  <button
-                    key={category}
-                    className={
-                      selectedCategory === category
-                        ? "category-button active"
-                        : "category-button"
-                    }
-                    onClick={() => {
-                      setSelectedCategory(category);
-                      setVisibleCount(6);
-                    }}
-                  >
-                    {category}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <p>
+              Search and explore TV shows
+              you would love to watch.
+            </p>
 
-            <div className="sort-section">
-              <label htmlFor="sort">
-                <strong>Sort by:</strong>
-              </label>
+            <div className="search-box">
 
-              <select
-                id="sort"
-                value={sortOption}
-                onChange={(e) => {
-                  setSortOption(e.target.value);
-                  setVisibleCount(6);
-                }}
-              >
-                <option value="default">Default</option>
-
-                <option value="rating-high">
-                  Rating: High to Low
-                </option>
-
-                <option value="rating-low">
-                  Rating: Low to High
-                </option>
-
-                <option value="title-az">
-                  Title: A to Z
-                </option>
-
-                <option value="title-za">
-                  Title: Z to A
-                </option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Loading */}
-        {loading && (
-          <div className="status">
-            <p>Loading movies...</p>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && !loading && (
-          <div className="status">
-            <p>{error}</p>
-          </div>
-        )}
-
-        {/* Results heading */}
-        {!loading &&
-          !error &&
-          sortedMovies.length > 0 && (
-            <h2>Search Results</h2>
-          )}
-
-        {/* No category results */}
-        {!loading &&
-          !error &&
-          movies.length > 0 &&
-          sortedMovies.length === 0 && (
-            <div className="status">
-              <p>No results found in this category.</p>
-            </div>
-          )}
-
-        {/* Movie cards */}
-        <div className="movie-grid">
-          {visibleMovies.map((movie) => {
-            const isWishlisted = wishlist.some(
-              (item) => item.id === movie.id
-            );
-
-            return (
-              <div
-                className="movie-card"
-                key={movie.id}
-                onClick={() => handleMovieClick(movie.id)}
-              >
-                <div className="poster-container">
-                  {movie.image ? (
-                    <img
-                      src={movie.image}
-                      alt={movie.title}
-                      className="poster"
-                    />
-                  ) : (
-                    <div className="no-poster">
-                      No Poster
-                    </div>
-                  )}
-                </div>
-
-                <div className="movie-info">
-                  <h3>{movie.title}</h3>
-
-                  <p>
-                    <strong>Type:</strong>{" "}
-                    {movie.type || "Not available"}
-                  </p>
-
-                  <p>
-                    <strong>Rating:</strong>{" "}
-                    {movie.rating !== null
-                      ? movie.rating
-                      : "Not available"}
-                  </p>
-
-                  <p>
-                    <strong>Released:</strong>{" "}
-                    {movie.premiered || "Not available"}
-                  </p>
-
-                  <p>
-                    <strong>Genres:</strong>{" "}
-                    {movie.genres?.length > 0
-                      ? movie.genres.join(", ")
-                      : "Not available"}
-                  </p>
-
-                  <button
-                    className="details-button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleMovieClick(movie.id);
-                    }}
-                  >
-                    View Details
-                  </button>
-
-                  <button
-                    className={
-                      isWishlisted
-                        ? "wishlist-button saved"
-                        : "wishlist-button"
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleWishlist(movie);
-                    }}
-                  >
-                    {isWishlisted
-                      ? "❤️ Added to Wishlist"
-                      : "♡ Add to Wishlist"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Load More button */}
-        {!loading &&
-          !error &&
-          visibleCount < sortedMovies.length && (
-            <div className="load-more-container">
-              <button
-                className="load-more-button"
-                onClick={() =>
-                  setVisibleCount((current) => current + 6)
+              <input
+                type="text"
+                placeholder="Search for a show..."
+                value={search}
+                onChange={(e) =>
+                  setSearch(e.target.value)
                 }
-              >
-                Load More
-              </button>
-            </div>
-          )}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter"
+                  ) {
+                    handleSearch();
+                  }
+                }}
+              />
 
-        {/* Details loading */}
-        {detailsLoading && (
-          <div className="details-overlay">
-            <div className="details-box">
-              <p>Loading details...</p>
+              <button
+                onClick={handleSearch}
+                disabled={loading}
+              >
+                {loading
+                  ? "Searching..."
+                  : "Search"}
+              </button>
+
+              {search && (
+                <button
+                  className="clear-button"
+                  onClick={
+                    handleClearSearch
+                  }
+                >
+                  Clear
+                </button>
+              )}
+
             </div>
-          </div>
+
+          </section>
         )}
 
-        {/* Movie details */}
-        {selectedMovie && !detailsLoading && (
-          <div className="details-overlay">
-            <div className="details-box">
-              <button
-                className="close-button"
-                onClick={closeDetails}
-              >
-                ✕
-              </button>
+        {/* ====================================
+            SHOW SECTION
+        ==================================== */}
+
+        <section className="movies-section">
+
+          {/* SECTION HEADER */}
+
+          <div className="section-header">
+
+            <h2>
+              {showWishlist
+                ? "❤️ My Wishlist"
+                : search
+                ? `Results for "${search}"`
+                : "Search Shows"}
+            </h2>
+
+            {!showWishlist &&
+              movies.length > 0 && (
+
+                <select
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="default">
+                    Sort By
+                  </option>
+
+                  <option value="rating">
+                    Highest Rating
+                  </option>
+
+                  <option value="release">
+                    Newest Release
+                  </option>
+
+                  <option value="title">
+                    Title A-Z
+                  </option>
+
+                </select>
+
+              )}
+
+          </div>
+
+          {/* ==================================
+              FILTERS
+          ================================== */}
+
+          {!showWishlist &&
+            movies.length > 0 && (
+
+              <div className="filters">
+
+                <select
+                  value={genreFilter}
+                  onChange={(e) =>
+                    setGenreFilter(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="all">
+                    All Genres
+                  </option>
+
+                  {availableGenres.map(
+                    (genre) => (
+                      <option
+                        key={genre}
+                        value={genre}
+                      >
+                        {genre}
+                      </option>
+                    )
+                  )}
+
+                </select>
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) =>
+                    setStatusFilter(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="all">
+                    All Status
+                  </option>
+
+                  {availableStatuses.map(
+                    (status) => (
+                      <option
+                        key={status}
+                        value={status}
+                      >
+                        {status}
+                      </option>
+                    )
+                  )}
+
+                </select>
+
+                <select
+                  value={languageFilter}
+                  onChange={(e) =>
+                    setLanguageFilter(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="all">
+                    All Languages
+                  </option>
+
+                  {availableLanguages.map(
+                    (language) => (
+                      <option
+                        key={language}
+                        value={language}
+                      >
+                        {language}
+                      </option>
+                    )
+                  )}
+
+                </select>
+
+                <select
+                  value={ratingFilter}
+                  onChange={(e) =>
+                    setRatingFilter(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="all">
+                    Any Rating
+                  </option>
+
+                  <option value="8">
+                    ⭐ 8+
+                  </option>
+
+                  <option value="7">
+                    ⭐ 7+
+                  </option>
+
+                  <option value="6">
+                    ⭐ 6+
+                  </option>
+
+                  <option value="5">
+                    ⭐ 5+
+                  </option>
+
+                </select>
+
+                <button
+                  className="clear-filter-button"
+                  onClick={clearFilters}
+                >
+                  Clear Filters
+                </button>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              LOADING
+          ================================== */}
+
+          {!showWishlist &&
+            loading && (
+
+              <div className="status-message">
+
+                <p>
+                  ⏳ Searching for shows...
+                </p>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              ERROR
+          ================================== */}
+
+          {!showWishlist &&
+            !loading &&
+            error && (
+
+              <div className="status-message error-message">
+
+                <p>
+                  ❌ {error}
+                </p>
+
+                <button
+                  onClick={() =>
+                    fetchMovies(search)
+                  }
+                >
+                  Try Again
+                </button>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              INITIAL STATE
+          ================================== */}
+
+          {!showWishlist &&
+            !loading &&
+            !error &&
+            !search && (
+
+              <div className="status-message">
+
+                <h3>
+                  🔎 Search for a show
+                </h3>
+
+                <p>
+                  Enter a show name above
+                  to discover TV shows.
+                </p>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              NO RESULTS
+          ================================== */}
+
+          {!showWishlist &&
+            !loading &&
+            !error &&
+            search &&
+            movies.length === 0 && (
+
+              <div className="status-message">
+
+                <h3>
+                  😕 No shows found
+                </h3>
+
+                <p>
+                  Try searching with
+                  a different name.
+                </p>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              NO FILTER RESULTS
+          ================================== */}
+
+          {!showWishlist &&
+            !loading &&
+            !error &&
+            search &&
+            movies.length > 0 &&
+            filteredMovies.length === 0 && (
+
+              <div className="status-message">
+
+                <h3>
+                  🔎 No shows match
+                  your filters
+                </h3>
+
+                <p>
+                  Try changing or
+                  clearing your filters.
+                </p>
+
+                <button
+                  onClick={clearFilters}
+                >
+                  Clear Filters
+                </button>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              EMPTY WISHLIST
+          ================================== */}
+
+          {showWishlist &&
+            wishlist.length === 0 && (
+
+              <div className="status-message">
+
+                <h3>
+                  💔 Your wishlist is empty
+                </h3>
+
+                <p>
+                  Browse shows and add
+                  your favourites.
+                </p>
+
+                <button
+                  onClick={() =>
+                    setShowWishlist(false)
+                  }
+                >
+                  Browse Shows
+                </button>
+
+              </div>
+
+            )}
+
+          {/* ==================================
+              SHOW CARDS
+          ================================== */}
+
+          {(showWishlist ||
+            (!loading && !error)) &&
+            moviesToDisplay.length > 0 && (
+
+              <div className="movie-grid">
+
+                {moviesToDisplay.map(
+                  (movie) => (
+
+                    <div
+                      className="movie-card"
+                      key={movie.id}
+                    >
+
+                      {/* POSTER */}
+
+                      {movie.image ? (
+
+                        <img
+                          src={movie.image}
+                          alt={movie.title}
+                          className="movie-poster"
+                        />
+
+                      ) : (
+
+                        <div className="poster-placeholder">
+                          🎬
+                        </div>
+
+                      )}
+
+                      {/* TITLE */}
+
+                      <h3>
+                        {movie.title ||
+                          "Unknown Title"}
+                      </h3>
+
+                      {/* YEAR */}
+
+                      {movie.year && (
+                        <p>
+                          📅 {movie.year}
+                        </p>
+                      )}
+
+                      {/* RATING */}
+
+                      <p>
+                        ⭐{" "}
+                        {movie.rating
+                          ? movie.rating
+                          : "Not rated"}
+                      </p>
+
+                      {/* GENRES */}
+
+                      {movie.genres &&
+                        movie.genres.length >
+                          0 && (
+
+                          <p>
+                            🎭{" "}
+                            {movie.genres.join(
+                              ", "
+                            )}
+                          </p>
+
+                        )}
+
+                      {/* STATUS */}
+
+                      {movie.status && (
+                        <p>
+                          📺 {movie.status}
+                        </p>
+                      )}
+
+                      {/* ACTIONS */}
+
+                      <div className="movie-actions">
+
+                        <button
+                          className="details-button"
+                          onClick={() =>
+                            handleViewDetails(
+                              movie
+                            )
+                          }
+                          disabled={
+                            detailsLoading
+                          }
+                        >
+                          {detailsLoading
+                            ? "Loading..."
+                            : "View Details"}
+                        </button>
+
+                        {isInWishlist(
+                          movie.id
+                        ) ? (
+
+                          <button
+                            className="remove-button"
+                            onClick={() =>
+                              removeFromWishlist(
+                                movie.id
+                              )
+                            }
+                          >
+                            💔 Remove
+                          </button>
+
+                        ) : (
+
+                          <button
+                            className="wishlist-button"
+                            onClick={() =>
+                              addToWishlist(
+                                movie
+                              )
+                            }
+                          >
+                            ❤️ Add to Wishlist
+                          </button>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+        </section>
+
+        {/* ====================================
+            DETAILS
+        ==================================== */}
+
+        {selectedMovie && (
+
+          <section className="movie-details">
+
+            <div className="details-card">
+
+              {/* DETAILS IMAGE */}
+
+              {selectedMovie.image ? (
+
+                <img
+                  src={selectedMovie.image}
+                  alt={selectedMovie.title}
+                  className="details-poster-image"
+                />
+
+              ) : (
+
+                <div className="details-poster">
+                  🎬
+                </div>
+
+              )}
 
               <div className="details-content">
-                <div className="details-image">
-                  {selectedMovie.image ? (
-                    <img
-                      src={selectedMovie.image}
-                      alt={selectedMovie.title}
-                    />
-                  ) : (
-                    <div className="no-poster">
-                      No Poster
-                    </div>
+
+                <h2>
+                  {selectedMovie.title}
+                </h2>
+
+                {selectedMovie.year && (
+                  <p>
+                    <strong>
+                      Release Year:
+                    </strong>{" "}
+                    {selectedMovie.year}
+                  </p>
+                )}
+
+                <p>
+                  <strong>
+                    Rating:
+                  </strong>{" "}
+                  {selectedMovie.rating
+                    ? `⭐ ${selectedMovie.rating}`
+                    : "Not rated"}
+                </p>
+
+                {selectedMovie.genres &&
+                  selectedMovie.genres.length >
+                    0 && (
+
+                    <p>
+                      <strong>
+                        Genres:
+                      </strong>{" "}
+                      {selectedMovie.genres.join(
+                        ", "
+                      )}
+                    </p>
+
                   )}
-                </div>
 
-                <div className="details-info">
-                  <h2>{selectedMovie.title}</h2>
-
+                {selectedMovie.language && (
                   <p>
-                    <strong>Type:</strong>{" "}
-                    {selectedMovie.type || "Not available"}
+                    <strong>
+                      Language:
+                    </strong>{" "}
+                    {selectedMovie.language}
                   </p>
+                )}
 
+                {selectedMovie.status && (
                   <p>
-                    <strong>Language:</strong>{" "}
-                    {selectedMovie.language || "Not available"}
+                    <strong>
+                      Status:
+                    </strong>{" "}
+                    {selectedMovie.status}
                   </p>
+                )}
 
+                {selectedMovie.runtime && (
                   <p>
-                    <strong>Genres:</strong>{" "}
-                    {selectedMovie.genres?.length > 0
-                      ? selectedMovie.genres.join(", ")
-                      : "Not available"}
+                    <strong>
+                      Runtime:
+                    </strong>{" "}
+                    {selectedMovie.runtime} minutes
                   </p>
+                )}
 
+                {selectedMovie.network && (
                   <p>
-                    <strong>Rating:</strong>{" "}
-                    {selectedMovie.rating !== null
-                      ? selectedMovie.rating
-                      : "Not available"}
+                    <strong>
+                      Network:
+                    </strong>{" "}
+                    {selectedMovie.network}
                   </p>
+                )}
 
+                {selectedMovie.description && (
                   <p>
-                    <strong>Premiered:</strong>{" "}
-                    {selectedMovie.premiered || "Not available"}
+                    <strong>
+                      Description:
+                    </strong>{" "}
+                    {selectedMovie.description}
                   </p>
+                )}
 
+                {selectedMovie.officialSite && (
                   <p>
-                    <strong>Ended:</strong>{" "}
-                    {selectedMovie.ended || "Still running"}
-                  </p>
-
-                  <p>
-                    <strong>Status:</strong>{" "}
-                    {selectedMovie.status || "Not available"}
-                  </p>
-
-                  <p>
-                    <strong>Runtime:</strong>{" "}
-                    {selectedMovie.runtime
-                      ? `${selectedMovie.runtime} minutes`
-                      : "Not available"}
-                  </p>
-
-                  <h3>Summary</h3>
-
-                  <div
-                    className="summary"
-                    dangerouslySetInnerHTML={{
-                      __html:
-                        selectedMovie.summary ||
-                        "No summary available.",
-                    }}
-                  />
-
-                  {selectedMovie.officialSite && (
+                    <strong>
+                      Official Site:
+                    </strong>{" "}
                     <a
-                      href={selectedMovie.officialSite}
+                      href={
+                        selectedMovie.officialSite
+                      }
                       target="_blank"
                       rel="noreferrer"
-                      className="official-button"
                     >
-                      Visit Official Site
+                      Visit official site
                     </a>
+                  </p>
+                )}
+
+                {/* CAST */}
+
+                {selectedMovie.cast &&
+                  selectedMovie.cast.length >
+                    0 && (
+
+                    <div>
+
+                      <h3>
+                        Cast
+                      </h3>
+
+                      <div className="cast-list">
+
+                        {selectedMovie.cast.map(
+                          (
+                            person,
+                            index
+                          ) => (
+
+                            <p
+                              key={index}
+                            >
+                              <strong>
+                                {person.name}
+                              </strong>
+                              {" as "}
+                              {person.character}
+                            </p>
+
+                          )
+                        )}
+
+                      </div>
+
+                    </div>
+
                   )}
-                </div>
+
+                {/* CLOSE */}
+
+                <button
+                  className="close-button"
+                  onClick={() =>
+                    setSelectedMovie(null)
+                  }
+                >
+                  Close Details
+                </button>
+
               </div>
+
             </div>
-          </div>
+
+          </section>
+
         )}
+
       </main>
+
     </div>
   );
 }
