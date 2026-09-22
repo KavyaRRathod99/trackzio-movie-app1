@@ -15,11 +15,20 @@ button {
   border-radius: 8px;
   padding: 10px 16px;
   font-size: 14px;
+  transition: opacity 0.2s, transform 0.2s;
 }
 
 button:hover {
   opacity: 0.9;
 }
+
+button:active {
+  transform: scale(0.98);
+}
+
+/* ==========================================
+   NAVBAR
+========================================== */
 
 .navbar {
   display: flex;
@@ -44,6 +53,10 @@ button:hover {
   color: white;
 }
 
+/* ==========================================
+   HERO
+========================================== */
+
 .hero {
   text-align: center;
   padding: 70px 20px;
@@ -58,7 +71,12 @@ button:hover {
 .hero p {
   color: #cbd5e1;
   font-size: 18px;
+  margin-bottom: 20px;
 }
+
+/* ==========================================
+   SEARCH
+========================================== */
 
 .search-box {
   display: flex;
@@ -85,6 +103,26 @@ button:hover {
   background: #475569;
 }
 
+/* ==========================================
+   BROWSE BUTTON
+========================================== */
+
+.browse-button {
+  margin-top: 18px;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  padding: 12px 22px;
+}
+
+.browse-button:hover {
+  background: #1d4ed8;
+}
+
+/* ==========================================
+   MOVIE SECTION
+========================================== */
+
 .movies-section {
   padding: 40px 6%;
 }
@@ -104,7 +142,13 @@ button:hover {
   padding: 10px;
   border-radius: 6px;
   border: none;
+  background: white;
+  color: #111827;
 }
+
+/* ==========================================
+   MOVIE GRID
+========================================== */
 
 .movie-grid {
   display: grid;
@@ -115,15 +159,21 @@ button:hover {
   gap: 25px;
 }
 
+/* ==========================================
+   MOVIE CARD
+========================================== */
+
 .movie-card {
   background: #1e293b;
   padding: 15px;
   border-radius: 12px;
-  transition: transform 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s;
+  overflow: hidden;
 }
 
 .movie-card:hover {
   transform: translateY(-5px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
 }
 
 .poster-placeholder,
@@ -147,11 +197,18 @@ button:hover {
 
 .movie-card h3 {
   margin-bottom: 5px;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .movie-card p {
   color: #94a3b8;
+  line-height: 1.4;
 }
+
+/* ==========================================
+   MOVIE ACTIONS
+========================================== */
 
 .movie-actions {
   display: flex;
@@ -174,6 +231,37 @@ button:hover {
   color: white;
 }
 
+/* ==========================================
+   LOAD MORE
+========================================== */
+
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 35px;
+}
+
+.load-more-button {
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  padding: 13px 28px;
+  min-width: 180px;
+}
+
+.load-more-button:hover {
+  background: #1d4ed8;
+}
+
+.load-more-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ==========================================
+   STATUS / ERROR
+========================================== */
+
 .status-message {
   text-align: center;
   padding: 50px 20px;
@@ -188,6 +276,10 @@ button:hover {
 .error-message {
   color: #fca5a5;
 }
+
+/* ==========================================
+   DETAILS
+========================================== */
 
 .movie-details {
   padding: 20px 6% 60px;
@@ -225,11 +317,13 @@ button:hover {
 
 .details-content {
   flex: 1;
+  min-width: 0;
 }
 
 .details-content h2 {
   font-size: 32px;
   margin-top: 0;
+  word-break: break-word;
 }
 
 .details-content p {
@@ -243,18 +337,74 @@ button:hover {
   color: white;
 }
 
+/* ==========================================
+   TABLET
+========================================== */
+
+@media (max-width: 900px) {
+  .movie-grid {
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(180px, 1fr)
+    );
+    gap: 20px;
+  }
+
+  .movies-section {
+    padding: 35px 4%;
+  }
+
+  .hero {
+    padding: 55px 20px;
+  }
+
+  .details-card {
+    max-width: 100%;
+  }
+}
+
+/* ==========================================
+   MOBILE
+========================================== */
+
 @media (max-width: 600px) {
   .navbar {
     flex-direction: column;
     gap: 15px;
+    padding: 18px 5%;
+  }
+
+  .navbar nav {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .hero {
+    padding: 45px 15px;
   }
 
   .hero h2 {
     font-size: 30px;
   }
 
+  .hero p {
+    font-size: 16px;
+  }
+
   .search-box {
     flex-direction: column;
+    width: 100%;
+  }
+
+  .search-box input,
+  .search-box button {
+    width: 100%;
+  }
+
+  .browse-button {
+    width: 100%;
+    max-width: 700px;
   }
 
   .section-header {
@@ -263,13 +413,71 @@ button:hover {
     gap: 15px;
   }
 
+  .section-header select {
+    width: 100%;
+  }
+
+  .movie-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .movie-card {
+    padding: 10px;
+  }
+
+  .poster-placeholder,
+  .movie-poster {
+    height: 220px;
+  }
+
+  .movie-card h3 {
+    font-size: 16px;
+  }
+
+  .movie-card p {
+    font-size: 13px;
+  }
+
+  .movie-actions button {
+    width: 100%;
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+
+  .load-more-button {
+    width: 100%;
+    max-width: 300px;
+  }
+
   .details-card {
     flex-direction: column;
+    padding: 20px;
   }
 
   .details-poster,
   .details-poster-image {
     width: 100%;
     min-width: 100%;
+    height: 400px;
+  }
+
+  .details-content h2 {
+    font-size: 26px;
+  }
+}
+
+/* ==========================================
+   VERY SMALL PHONES
+========================================== */
+
+@media (max-width: 380px) {
+  .movie-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .poster-placeholder,
+  .movie-poster {
+    height: 300px;
   }
 }

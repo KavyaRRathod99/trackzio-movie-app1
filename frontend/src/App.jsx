@@ -4,6 +4,8 @@ import "./App.css";
 
 const API_URL = "http://localhost:5000/api";
 
+let searchController = null;
+
 function App() {
   // ==========================================
   // STATE
@@ -20,7 +22,6 @@ function App() {
 
   const [sortBy, setSortBy] = useState("default");
 
-  // Filters
   const [genreFilter, setGenreFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [languageFilter, setLanguageFilter] = useState("all");
@@ -28,30 +29,32 @@ function App() {
 
   const [showWishlist, setShowWishlist] = useState(false);
 
+  // Browse state
+  const [browseShows, setBrowseShows] = useState([]);
+  const [browsePage, setBrowsePage] = useState(0);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState("");
+  const [browseStarted, setBrowseStarted] = useState(false);
+  const [browseHasMore, setBrowseHasMore] = useState(true);
+
   // ==========================================
-  // LOAD WISHLIST FROM LOCAL STORAGE
+  // WISHLIST
   // ==========================================
 
   const [wishlist, setWishlist] = useState(() => {
     try {
-      const savedWishlist = localStorage.getItem(
-        "trackzio-wishlist"
-      );
+      const saved = localStorage.getItem("trackzio-wishlist");
 
-      if (savedWishlist) {
-        return JSON.parse(savedWishlist);
+      if (saved) {
+        return JSON.parse(saved);
       }
 
       return [];
-    } catch (error) {
-      console.error("Wishlist loading error:", error);
+    } catch (err) {
+      console.error("Wishlist loading error:", err);
       return [];
     }
   });
-
-  // ==========================================
-  // SAVE WISHLIST TO LOCAL STORAGE
-  // ==========================================
 
   useEffect(() => {
     try {
@@ -59,21 +62,29 @@ function App() {
         "trackzio-wishlist",
         JSON.stringify(wishlist)
       );
-    } catch (error) {
-      console.error("Wishlist saving error:", error);
+    } catch (err) {
+      console.error("Wishlist saving error:", err);
     }
   }, [wishlist]);
 
   // ==========================================
-  // SEARCH SHOWS
+  // SEARCH
   // ==========================================
 
   const fetchMovies = async (searchTerm) => {
-    if (!searchTerm.trim()) {
+    const cleanSearch = searchTerm.trim();
+
+    if (!cleanSearch) {
       setMovies([]);
       setError("");
       return;
     }
+
+    if (searchController) {
+      searchController.abort();
+    }
+
+    searchController = new AbortController();
 
     try {
       setLoading(true);
@@ -81,12 +92,13 @@ function App() {
       setSelectedMovie(null);
 
       const response = await axios.get(
-        `${API_URL}/movies`,
+        API_URL + "/movies",
         {
           params: {
-            search: searchTerm.trim(),
+            search: cleanSearch
           },
           timeout: 12000,
+          signal: searchController.signal
         }
       );
 
@@ -101,11 +113,17 @@ function App() {
 
       setMovies(results);
 
+      if (results.length === 0) {
+        setError("");
+      }
+
     } catch (err) {
-      console.error(
-        "Frontend Search Error:",
-        err
-      );
+
+      if (err.code === "ERR_CANCELED") {
+        return;
+      }
+
+      console.error("Search error:", err);
 
       setMovies([]);
 
@@ -113,9 +131,7 @@ function App() {
         setError(
           "Too many requests. Please wait a moment and try again."
         );
-      } else if (
-        err.code === "ECONNABORTED"
-      ) {
+      } else if (err.code === "ECONNABORTED") {
         setError(
           "The server is taking too long to respond. Please try again."
         );
@@ -139,8 +155,6 @@ function App() {
     setSelectedMovie(null);
 
     setSortBy("default");
-
-    // Reset filters for new search
     setGenreFilter("all");
     setStatusFilter("all");
     setLanguageFilter("all");
@@ -154,19 +168,133 @@ function App() {
   // ==========================================
 
   const handleClearSearch = () => {
+    if (searchController) {
+      searchController.abort();
+      searchController = null;
+    }
+
     setSearch("");
     setMovies([]);
     setError("");
     setSelectedMovie(null);
 
     setSortBy("default");
-
     setGenreFilter("all");
     setStatusFilter("all");
     setLanguageFilter("all");
     setRatingFilter("all");
 
     setShowWishlist(false);
+    setLoading(false);
+  };
+
+  // ==========================================
+  // BROWSE SHOWS
+  // ==========================================
+
+  const fetchBrowseShows = async (
+    page = 0,
+    append = false
+  ) => {
+    try {
+      setBrowseLoading(true);
+      setBrowseError("");
+      setSelectedMovie(null);
+
+      const response = await axios.get(
+        API_URL + "/movies/browse",
+        {
+          params: {
+            page: page
+          },
+          timeout: 12000
+        }
+      );
+
+      if (response.data.success === false) {
+        throw new Error(
+          response.data.message ||
+            "Unable to browse shows."
+        );
+      }
+
+      const results =
+        response.data.results || [];
+
+      if (append) {
+        setBrowseShows((currentShows) => [
+          ...currentShows,
+          ...results
+        ]);
+      } else {
+        setBrowseShows(results);
+      }
+
+      setBrowsePage(page);
+      setBrowseHasMore(
+        response.data.hasMore === true
+      );
+      setBrowseStarted(true);
+
+    } catch (err) {
+      console.error(
+        "Browse shows error:",
+        err
+      );
+
+      if (err.response?.status === 429) {
+        setBrowseError(
+          "Too many requests. Please wait a moment and try again."
+        );
+      } else if (
+        err.code === "ECONNABORTED"
+      ) {
+        setBrowseError(
+          "The server is taking too long to respond. Please try again."
+        );
+      } else {
+        setBrowseError(
+          "Unable to browse shows right now. Please try again."
+        );
+      }
+
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  const handleBrowseShows = () => {
+    setShowWishlist(false);
+    setSelectedMovie(null);
+    setSearch("");
+    setMovies([]);
+    setError("");
+
+    setSortBy("default");
+    setGenreFilter("all");
+    setStatusFilter("all");
+    setLanguageFilter("all");
+    setRatingFilter("all");
+
+    setBrowseShows([]);
+    setBrowsePage(0);
+    setBrowseHasMore(true);
+
+    fetchBrowseShows(0, false);
+  };
+
+  const handleLoadMore = () => {
+    if (
+      browseLoading ||
+      !browseHasMore
+    ) {
+      return;
+    }
+
+    fetchBrowseShows(
+      browsePage + 1,
+      true
+    );
   };
 
   // ==========================================
@@ -179,9 +307,9 @@ function App() {
       setError("");
 
       const response = await axios.get(
-        `${API_URL}/movies/${movie.id}`,
+        API_URL + "/movies/" + movie.id,
         {
-          timeout: 15000,
+          timeout: 15000
         }
       );
 
@@ -199,31 +327,28 @@ function App() {
         response.data.movie
       );
 
-      // Scroll to details section
       setTimeout(() => {
         window.scrollTo({
           top: document.body.scrollHeight,
-          behavior: "smooth",
+          behavior: "smooth"
         });
       }, 100);
 
     } catch (err) {
       console.error(
-        "Details Error:",
+        "Details error:",
         err
       );
 
-      if (
+      if (err.response?.status === 404) {
+        setError(
+          "Show details were not found."
+        );
+      } else if (
         err.code === "ECONNABORTED"
       ) {
         setError(
           "The server is taking too long to respond. Please try again."
-        );
-      } else if (
-        err.response?.status === 404
-      ) {
-        setError(
-          "Show details were not found."
         );
       } else {
         setError(
@@ -237,32 +362,32 @@ function App() {
   };
 
   // ==========================================
-  // ADD TO WISHLIST
+  // WISHLIST FUNCTIONS
   // ==========================================
 
   const addToWishlist = (movie) => {
-    const alreadyAdded = wishlist.some(
-      (item) => item.id === movie.id
-    );
+    setWishlist((currentWishlist) => {
+      const alreadyAdded =
+        currentWishlist.some(
+          (item) => item.id === movie.id
+        );
 
-    if (alreadyAdded) {
-      return;
-    }
+      if (alreadyAdded) {
+        return currentWishlist;
+      }
 
-    setWishlist([
-      ...wishlist,
-      movie,
-    ]);
+      return [
+        ...currentWishlist,
+        movie
+      ];
+    });
   };
 
-  // ==========================================
-  // REMOVE FROM WISHLIST
-  // ==========================================
-
   const removeFromWishlist = (movieId) => {
-    setWishlist(
-      wishlist.filter(
-        (movie) => movie.id !== movieId
+    setWishlist((currentWishlist) =>
+      currentWishlist.filter(
+        (movie) =>
+          movie.id !== movieId
       )
     );
 
@@ -274,18 +399,15 @@ function App() {
     }
   };
 
-  // ==========================================
-  // CHECK WISHLIST
-  // ==========================================
-
   const isInWishlist = (movieId) => {
     return wishlist.some(
-      (movie) => movie.id === movieId
+      (movie) =>
+        movie.id === movieId
     );
   };
 
   // ==========================================
-  // AVAILABLE GENRES
+  // FILTER OPTIONS
   // ==========================================
 
   const availableGenres = [
@@ -294,12 +416,8 @@ function App() {
         (movie) =>
           movie.genres || []
       )
-    ),
+    )
   ].sort();
-
-  // ==========================================
-  // AVAILABLE STATUSES
-  // ==========================================
 
   const availableStatuses = [
     ...new Set(
@@ -309,12 +427,8 @@ function App() {
             movie.status
         )
         .filter(Boolean)
-    ),
+    )
   ].sort();
-
-  // ==========================================
-  // AVAILABLE LANGUAGES
-  // ==========================================
 
   const availableLanguages = [
     ...new Set(
@@ -324,11 +438,11 @@ function App() {
             movie.language
         )
         .filter(Boolean)
-    ),
+    )
   ].sort();
 
   // ==========================================
-  // APPLY FILTERS
+  // FILTER
   // ==========================================
 
   const getFilteredMovies = (
@@ -337,7 +451,6 @@ function App() {
     return movieList.filter(
       (movie) => {
 
-        // Genre
         if (
           genreFilter !== "all" &&
           !(movie.genres || []).includes(
@@ -347,28 +460,28 @@ function App() {
           return false;
         }
 
-        // Status
         if (
           statusFilter !== "all" &&
-          movie.status !== statusFilter
+          movie.status !==
+            statusFilter
         ) {
           return false;
         }
 
-        // Language
         if (
           languageFilter !== "all" &&
-          movie.language !== languageFilter
+          movie.language !==
+            languageFilter
         ) {
           return false;
         }
 
-        // Rating
         if (
           ratingFilter !== "all"
         ) {
           const rating =
-            Number(movie.rating) || 0;
+            Number(movie.rating) ||
+            0;
 
           if (
             rating <
@@ -384,33 +497,43 @@ function App() {
   };
 
   // ==========================================
-  // SORT MOVIES
+  // SORT
   // ==========================================
 
   const getSortedMovies = (
     movieList
   ) => {
     const sortedMovies = [
-      ...movieList,
+      ...movieList
     ];
 
-    if (sortBy === "rating") {
+    if (
+      sortBy === "rating"
+    ) {
       sortedMovies.sort(
         (a, b) =>
-          (Number(b.rating) || 0) -
-          (Number(a.rating) || 0)
+          (Number(b.rating) ||
+            0) -
+          (Number(a.rating) ||
+            0)
       );
     }
 
-    if (sortBy === "release") {
+    if (
+      sortBy === "release"
+    ) {
       sortedMovies.sort(
         (a, b) =>
-          (Number(b.year) || 0) -
-          (Number(a.year) || 0)
+          (Number(b.year) ||
+            0) -
+          (Number(a.year) ||
+            0)
       );
     }
 
-    if (sortBy === "title") {
+    if (
+      sortBy === "title"
+    ) {
       sortedMovies.sort(
         (a, b) =>
           (a.title || "").localeCompare(
@@ -437,7 +560,7 @@ function App() {
         );
 
   // ==========================================
-  // RESET FILTERS
+  // CLEAR FILTERS
   // ==========================================
 
   const clearFilters = () => {
@@ -448,125 +571,227 @@ function App() {
   };
 
   // ==========================================
+  // NAVIGATION
+  // ==========================================
+
+  const goHome = () => {
+    setShowWishlist(false);
+    setSelectedMovie(null);
+    setError("");
+  };
+
+  const openWishlist = () => {
+    setShowWishlist(true);
+    setSelectedMovie(null);
+    setError("");
+  };
+
+  // ==========================================
   // RENDER
   // ==========================================
 
   return (
     <div className="app">
 
-      {/* ======================================
-          NAVBAR
-      ====================================== */}
+      {/* NAVBAR */}
 
       <header className="navbar">
 
-        <h1>
-          🎬 Show Discovery
-        </h1>
-
-        <nav>
+        <div className="navbar-inner">
 
           <button
-            onClick={() => {
-              setShowWishlist(false);
-              setSelectedMovie(null);
-            }}
+            className="brand-button"
+            onClick={goHome}
           >
-            Home
+            <span className="brand-icon">
+              🎬
+            </span>
+
+            <span>
+              Show Discovery
+            </span>
           </button>
 
-          <button
-            onClick={() => {
-              setShowWishlist(true);
-              setSelectedMovie(null);
-              setError("");
-            }}
-          >
-            ❤️ Wishlist ({wishlist.length})
-          </button>
+          <nav className="nav-buttons">
 
-        </nav>
+            <button
+              className={
+                !showWishlist
+                  ? "active"
+                  : ""
+              }
+              onClick={goHome}
+            >
+              Home
+            </button>
+
+            <button
+              className={
+                showWishlist
+                  ? "active"
+                  : ""
+              }
+              onClick={
+                openWishlist
+              }
+            >
+              Wishlist (
+              {wishlist.length})
+            </button>
+
+          </nav>
+
+        </div>
 
       </header>
 
       <main>
 
-        {/* ====================================
-            HERO / SEARCH
-        ==================================== */}
+        {/* HERO / SEARCH */}
 
         {!showWishlist && (
           <section className="hero">
 
-            <h2>
-              Discover Your Next Show
-            </h2>
+            <div className="hero-content">
 
-            <p>
-              Search and explore TV shows
-              you would love to watch.
-            </p>
+              <p className="hero-label">
+                TV SHOW DISCOVERY
+              </p>
 
-            <div className="search-box">
+              <h2>
+                Discover Your Next Show
+              </h2>
 
-              <input
-                type="text"
-                placeholder="Search for a show..."
-                value={search}
-                onChange={(e) =>
-                  setSearch(e.target.value)
-                }
-                onKeyDown={(e) => {
-                  if (
-                    e.key === "Enter"
-                  ) {
-                    handleSearch();
+              <p className="hero-description">
+                Search, filter and
+                explore TV shows
+                you would love to
+                watch.
+              </p>
+
+              <div className="search-box">
+
+                <input
+                  type="text"
+                  placeholder="Search for a show..."
+                  value={search}
+                  onChange={(e) =>
+                    setSearch(
+                      e.target.value
+                    )
                   }
-                }}
-              />
+                  onKeyDown={(e) => {
+                    if (
+                      e.key ===
+                      "Enter"
+                    ) {
+                      handleSearch();
+                    }
+                  }}
+                />
 
-              <button
-                onClick={handleSearch}
-                disabled={loading}
-              >
-                {loading
-                  ? "Searching..."
-                  : "Search"}
-              </button>
-
-              {search && (
                 <button
-                  className="clear-button"
                   onClick={
-                    handleClearSearch
+                    handleSearch
+                  }
+                  disabled={
+                    loading
                   }
                 >
-                  Clear
+                  {loading
+                    ? "Searching..."
+                    : "Search"}
                 </button>
-              )}
+
+                {search &&
+                  !loading && (
+                    <button
+                      className="clear-button"
+                      onClick={
+                        handleClearSearch
+                      }
+                    >
+                      Clear
+                    </button>
+                  )}
+
+              </div>
+
+              {/* BROWSE BUTTON */}
+
+              <button
+                className="browse-button"
+                onClick={
+                  handleBrowseShows
+                }
+                disabled={
+                  browseLoading
+                }
+              >
+                {browseLoading &&
+                !browseStarted
+                  ? "Loading Shows..."
+                  : "Browse Shows"}
+              </button>
 
             </div>
 
           </section>
         )}
 
-        {/* ====================================
-            SHOW SECTION
-        ==================================== */}
+        {/* SHOW SECTION */}
 
         <section className="movies-section">
 
-          {/* SECTION HEADER */}
-
           <div className="section-header">
 
-            <h2>
-              {showWishlist
-                ? "❤️ My Wishlist"
-                : search
-                ? `Results for "${search}"`
-                : "Search Shows"}
-            </h2>
+            <div>
+
+              <h2>
+                {showWishlist
+                  ? "My Wishlist"
+                  : browseStarted &&
+                    !search
+                  ? "Explore Shows"
+                  : search
+                  ? `Results for "${search}"`
+                  : "Search Shows"}
+              </h2>
+
+              {!showWishlist &&
+                movies.length > 0 && (
+                  <p className="result-count">
+                    {filteredMovies.length}{" "}
+                    of{" "}
+                    {movies.length}{" "}
+                    shows
+                  </p>
+                )}
+
+              {browseStarted &&
+                !showWishlist &&
+                !search &&
+                browseShows.length >
+                  0 && (
+                  <p className="result-count">
+                    Showing{" "}
+                    {browseShows.length}{" "}
+                    shows
+                  </p>
+                )}
+
+              {showWishlist && (
+                <p className="result-count">
+                  {wishlist.length} saved
+                  show
+                  {wishlist.length !==
+                  1
+                    ? "s"
+                    : ""}
+                </p>
+              )}
+
+            </div>
 
             {!showWishlist &&
               movies.length > 0 && (
@@ -602,9 +827,7 @@ function App() {
 
           </div>
 
-          {/* ==================================
-              FILTERS
-          ================================== */}
+          {/* FILTERS */}
 
           {!showWishlist &&
             movies.length > 0 && (
@@ -612,7 +835,9 @@ function App() {
               <div className="filters">
 
                 <select
-                  value={genreFilter}
+                  value={
+                    genreFilter
+                  }
                   onChange={(e) =>
                     setGenreFilter(
                       e.target.value
@@ -638,7 +863,9 @@ function App() {
                 </select>
 
                 <select
-                  value={statusFilter}
+                  value={
+                    statusFilter
+                  }
                   onChange={(e) =>
                     setStatusFilter(
                       e.target.value
@@ -664,7 +891,9 @@ function App() {
                 </select>
 
                 <select
-                  value={languageFilter}
+                  value={
+                    languageFilter
+                  }
                   onChange={(e) =>
                     setLanguageFilter(
                       e.target.value
@@ -690,7 +919,9 @@ function App() {
                 </select>
 
                 <select
-                  value={ratingFilter}
+                  value={
+                    ratingFilter
+                  }
                   onChange={(e) =>
                     setRatingFilter(
                       e.target.value
@@ -703,26 +934,24 @@ function App() {
                   </option>
 
                   <option value="8">
-                    ⭐ 8+
+                    8+ Rating
                   </option>
 
                   <option value="7">
-                    ⭐ 7+
+                    7+ Rating
                   </option>
 
                   <option value="6">
-                    ⭐ 6+
-                  </option>
-
-                  <option value="5">
-                    ⭐ 5+
+                    6+ Rating
                   </option>
 
                 </select>
 
                 <button
-                  className="clear-filter-button"
-                  onClick={clearFilters}
+                  className="filter-clear-button"
+                  onClick={
+                    clearFilters
+                  }
                 >
                   Clear Filters
                 </button>
@@ -731,40 +960,30 @@ function App() {
 
             )}
 
-          {/* ==================================
-              LOADING
-          ================================== */}
+          {/* ERROR */}
 
-          {!showWishlist &&
-            loading && (
-
-              <div className="status-message">
-
-                <p>
-                  ⏳ Searching for shows...
-                </p>
-
-              </div>
-
-            )}
-
-          {/* ==================================
-              ERROR
-          ================================== */}
-
-          {!showWishlist &&
-            !loading &&
+          {!loading &&
             error && (
 
               <div className="status-message error-message">
 
+                <div className="status-icon">
+                  !
+                </div>
+
+                <h3>
+                  Something went wrong
+                </h3>
+
                 <p>
-                  ❌ {error}
+                  {error}
                 </p>
 
                 <button
                   onClick={() =>
-                    fetchMovies(search)
+                    fetchMovies(
+                      search
+                    )
                   }
                 >
                   Try Again
@@ -774,71 +993,159 @@ function App() {
 
             )}
 
-          {/* ==================================
-              INITIAL STATE
-          ================================== */}
+          {/* BROWSE ERROR */}
 
-          {!showWishlist &&
-            !loading &&
-            !error &&
-            !search && (
+          {!browseLoading &&
+            browseError &&
+            !search &&
+            !showWishlist && (
 
-              <div className="status-message">
+              <div className="status-message error-message">
+
+                <div className="status-icon">
+                  !
+                </div>
 
                 <h3>
-                  🔎 Search for a show
+                  Browse failed
                 </h3>
 
                 <p>
-                  Enter a show name above
-                  to discover TV shows.
+                  {browseError}
+                </p>
+
+                <button
+                  onClick={
+                    handleBrowseShows
+                  }
+                >
+                  Try Again
+                </button>
+
+              </div>
+
+            )}
+
+          {/* LOADING */}
+
+          {loading && (
+
+            <div className="status-message">
+
+              <div className="loading-spinner"></div>
+
+              <h3>
+                Searching for shows...
+              </h3>
+
+              <p>
+                Please wait while we
+                find matching shows.
+              </p>
+
+            </div>
+
+          )}
+
+          {/* BROWSE LOADING */}
+
+          {browseLoading &&
+            !loading &&
+            !showWishlist && (
+
+              <div className="status-message">
+
+                <div className="loading-spinner"></div>
+
+                <h3>
+                  Exploring shows...
+                </h3>
+
+                <p>
+                  Loading more shows
+                  for you.
                 </p>
 
               </div>
 
             )}
 
-          {/* ==================================
-              NO RESULTS
-          ================================== */}
+          {/* NO SEARCH */}
 
           {!showWishlist &&
             !loading &&
+            !browseLoading &&
+            !error &&
+            !browseError &&
+            !search &&
+            !browseStarted && (
+
+              <div className="status-message">
+
+                <div className="status-icon">
+                  🔎
+                </div>
+
+                <h3>
+                  Start discovering
+                </h3>
+
+                <p>
+                  Search for a show or
+                  browse our collection
+                  to explore more.
+                </p>
+
+              </div>
+
+            )}
+
+          {/* NO RESULTS */}
+
+          {!showWishlist &&
+            !loading &&
+            !browseLoading &&
             !error &&
             search &&
             movies.length === 0 && (
 
               <div className="status-message">
 
+                <div className="status-icon">
+                  🔎
+                </div>
+
                 <h3>
-                  😕 No shows found
+                  No shows found
                 </h3>
 
                 <p>
-                  Try searching with
-                  a different name.
+                  We couldn't find a
+                  show matching "{search}".
+                  Try another search.
                 </p>
 
               </div>
 
             )}
 
-          {/* ==================================
-              NO FILTER RESULTS
-          ================================== */}
+          {/* NO FILTER RESULTS */}
 
           {!showWishlist &&
             !loading &&
             !error &&
-            search &&
             movies.length > 0 &&
-            filteredMovies.length === 0 && (
+            filteredMovies.length ===
+              0 && (
 
               <div className="status-message">
 
+                <div className="status-icon">
+                  🔎
+                </div>
+
                 <h3>
-                  🔎 No shows match
-                  your filters
+                  No matching shows
                 </h3>
 
                 <p>
@@ -847,7 +1154,9 @@ function App() {
                 </p>
 
                 <button
-                  onClick={clearFilters}
+                  onClick={
+                    clearFilters
+                  }
                 >
                   Clear Filters
                 </button>
@@ -856,122 +1165,174 @@ function App() {
 
             )}
 
-          {/* ==================================
-              EMPTY WISHLIST
-          ================================== */}
+          {/* EMPTY WISHLIST */}
 
           {showWishlist &&
-            wishlist.length === 0 && (
+            wishlist.length ===
+              0 && (
 
               <div className="status-message">
 
+                <div className="status-icon">
+                  ♡
+                </div>
+
                 <h3>
-                  💔 Your wishlist is empty
+                  Your wishlist is
+                  empty
                 </h3>
 
                 <p>
-                  Browse shows and add
-                  your favourites.
+                  Search for shows and
+                  add your favorites to
+                  your wishlist.
                 </p>
 
                 <button
-                  onClick={() =>
-                    setShowWishlist(false)
-                  }
+                  onClick={goHome}
                 >
-                  Browse Shows
+                  Discover Shows
                 </button>
 
               </div>
 
             )}
 
-          {/* ==================================
-              SHOW CARDS
-          ================================== */}
+          {/* SEARCH SHOW GRID */}
 
-          {(showWishlist ||
-            (!loading && !error)) &&
-            moviesToDisplay.length > 0 && (
+          {moviesToDisplay.length >
+            0 && (
 
-              <div className="movie-grid">
+            <div className="movies-grid">
 
-                {moviesToDisplay.map(
-                  (movie) => (
+              {moviesToDisplay.map(
+                (movie) => (
 
-                    <div
-                      className="movie-card"
-                      key={movie.id}
-                    >
+                  <article
+                    className="movie-card"
+                    key={movie.id}
+                  >
 
-                      {/* POSTER */}
+                    {/* POSTER */}
+
+                    <div className="poster-container">
 
                       {movie.image ? (
 
                         <img
-                          src={movie.image}
-                          alt={movie.title}
-                          className="movie-poster"
+                          src={
+                            movie.image
+                          }
+                          alt={
+                            movie.title +
+                            " poster"
+                          }
+                          loading="lazy"
                         />
 
                       ) : (
 
                         <div className="poster-placeholder">
-                          🎬
+
+                          <span>
+                            🎬
+                          </span>
+
+                          <p>
+                            No Image
+                          </p>
+
                         </div>
 
                       )}
 
-                      {/* TITLE */}
+                      {movie.rating && (
 
-                      <h3>
-                        {movie.title ||
-                          "Unknown Title"}
-                      </h3>
+                        <span className="rating-badge">
+                          ★{" "}
+                          {movie.rating}
+                        </span>
 
-                      {/* YEAR */}
-
-                      {movie.year && (
-                        <p>
-                          📅 {movie.year}
-                        </p>
                       )}
 
-                      {/* RATING */}
+                    </div>
 
-                      <p>
-                        ⭐{" "}
-                        {movie.rating
-                          ? movie.rating
-                          : "Not rated"}
-                      </p>
+                    {/* CARD CONTENT */}
 
-                      {/* GENRES */}
+                    <div className="movie-card-content">
 
-                      {movie.genres &&
-                        movie.genres.length >
-                          0 && (
+                      <h3
+                        title={
+                          movie.title
+                        }
+                      >
+                        {movie.title}
+                      </h3>
 
-                          <p>
-                            🎭{" "}
-                            {movie.genres.join(
-                              ", "
-                            )}
-                          </p>
+                      <div className="movie-meta">
+
+                        {movie.year &&
+                          movie.year !==
+                            "N/A" && (
+
+                            <span>
+                              {movie.year}
+                            </span>
+
+                          )}
+
+                        {movie.language && (
+
+                          <span>
+                            {
+                              movie.language
+                            }
+                          </span>
 
                         )}
 
-                      {/* STATUS */}
+                      </div>
 
-                      {movie.status && (
-                        <p>
-                          📺 {movie.status}
-                        </p>
-                      )}
+                      {movie.genres &&
+                        movie.genres
+                          .length >
+                          0 && (
 
-                      {/* ACTIONS */}
+                          <div className="genre-list">
 
-                      <div className="movie-actions">
+                            {movie.genres
+                              .slice(
+                                0,
+                                3
+                              )
+                              .map(
+                                (
+                                  genre
+                                ) => (
+
+                                  <span
+                                    key={
+                                      genre
+                                    }
+                                  >
+                                    {
+                                      genre
+                                    }
+                                  </span>
+
+                                )
+                              )}
+
+                          </div>
+
+                        )}
+
+                      <p className="movie-description">
+                        {movie.description ||
+                          "No description available."}
+                      </p>
+
+                      <div className="card-actions">
 
                         <button
                           className="details-button"
@@ -984,7 +1345,9 @@ function App() {
                             detailsLoading
                           }
                         >
-                          {detailsLoading
+                          {detailsLoading &&
+                          selectedMovie?.id ===
+                            movie.id
                             ? "Loading..."
                             : "View Details"}
                         </button>
@@ -994,14 +1357,14 @@ function App() {
                         ) ? (
 
                           <button
-                            className="remove-button"
+                            className="wishlist-button saved"
                             onClick={() =>
                               removeFromWishlist(
                                 movie.id
                               )
                             }
                           >
-                            💔 Remove
+                            Saved
                           </button>
 
                         ) : (
@@ -1014,7 +1377,7 @@ function App() {
                               )
                             }
                           >
-                            ❤️ Add to Wishlist
+                            + Wishlist
                           </button>
 
                         )}
@@ -1023,6 +1386,212 @@ function App() {
 
                     </div>
 
+                  </article>
+
+                )
+              )}
+
+            </div>
+
+          )}
+
+          {/* BROWSE SHOW GRID */}
+
+          {!showWishlist &&
+            !search &&
+            browseStarted &&
+            browseShows.length >
+              0 && (
+
+              <div className="movies-grid">
+
+                {browseShows.map(
+                  (movie) => (
+
+                    <article
+                      className="movie-card"
+                      key={
+                        movie.id
+                      }
+                    >
+
+                      {/* POSTER */}
+
+                      <div className="poster-container">
+
+                        {movie.image ? (
+
+                          <img
+                            src={
+                              movie.image
+                            }
+                            alt={
+                              movie.title +
+                              " poster"
+                            }
+                            loading="lazy"
+                          />
+
+                        ) : (
+
+                          <div className="poster-placeholder">
+
+                            <span>
+                              🎬
+                            </span>
+
+                            <p>
+                              No Image
+                            </p>
+
+                          </div>
+
+                        )}
+
+                        {movie.rating && (
+
+                          <span className="rating-badge">
+                            ★{" "}
+                            {movie.rating}
+                          </span>
+
+                        )}
+
+                      </div>
+
+                      {/* CARD CONTENT */}
+
+                      <div className="movie-card-content">
+
+                        <h3
+                          title={
+                            movie.title
+                          }
+                        >
+                          {movie.title}
+                        </h3>
+
+                        <div className="movie-meta">
+
+                          {movie.year &&
+                            movie.year !==
+                              "N/A" && (
+
+                              <span>
+                                {
+                                  movie.year
+                                }
+                              </span>
+
+                            )}
+
+                          {movie.language && (
+
+                            <span>
+                              {
+                                movie.language
+                              }
+                            </span>
+
+                          )}
+
+                        </div>
+
+                        {movie.genres &&
+                          movie.genres
+                            .length >
+                            0 && (
+
+                            <div className="genre-list">
+
+                              {movie.genres
+                                .slice(
+                                  0,
+                                  3
+                                )
+                                .map(
+                                  (
+                                    genre
+                                  ) => (
+
+                                    <span
+                                      key={
+                                        genre
+                                      }
+                                    >
+                                      {
+                                        genre
+                                      }
+                                    </span>
+
+                                  )
+                                )}
+
+                            </div>
+
+                          )}
+
+                        <p className="movie-description">
+                          {movie.description ||
+                            "No description available."}
+                        </p>
+
+                        <div className="card-actions">
+
+                          <button
+                            className="details-button"
+                            onClick={() =>
+                              handleViewDetails(
+                                movie
+                              )
+                            }
+                            disabled={
+                              detailsLoading
+                            }
+                          >
+                            {detailsLoading &&
+                            selectedMovie?.id ===
+                              movie.id
+                              ? "Loading..."
+                              : "View Details"}
+                          </button>
+
+                          {isInWishlist(
+                            movie.id
+                          ) ? (
+
+                            <button
+                              className="wishlist-button saved"
+                              onClick={() =>
+                                removeFromWishlist(
+                                  movie.id
+                                )
+                              }
+                            >
+                              Saved
+                            </button>
+
+                          ) : (
+
+                            <button
+                              className="wishlist-button"
+                              onClick={() =>
+                                addToWishlist(
+                                  movie
+                                )
+                              }
+                            >
+                              + Wishlist
+                            </button>
+
+                          )}
+
+                        </div>
+
+                      </div>
+
+                    </article>
+
                   )
                 )}
 
@@ -1030,11 +1599,38 @@ function App() {
 
             )}
 
+          {/* LOAD MORE */}
+
+          {!showWishlist &&
+            !search &&
+            browseStarted &&
+            browseShows.length >
+              0 &&
+            browseHasMore && (
+
+              <div className="load-more-container">
+
+                <button
+                  className="browse-button load-more-button"
+                  onClick={
+                    handleLoadMore
+                  }
+                  disabled={
+                    browseLoading
+                  }
+                >
+                  {browseLoading
+                    ? "Loading More..."
+                    : "Load More Shows"}
+                </button>
+
+              </div>
+
+            )}
+
         </section>
 
-        {/* ====================================
-            DETAILS
-        ==================================== */}
+        {/* DETAILS */}
 
         {selectedMovie && (
 
@@ -1042,154 +1638,220 @@ function App() {
 
             <div className="details-card">
 
-              {/* DETAILS IMAGE */}
+              <button
+                className="close-details"
+                onClick={() =>
+                  setSelectedMovie(
+                    null
+                  )
+                }
+                aria-label="Close details"
+              >
+                ×
+              </button>
 
-              {selectedMovie.image ? (
+              {/* DETAILS POSTER */}
 
-                <img
-                  src={selectedMovie.image}
-                  alt={selectedMovie.title}
-                  className="details-poster-image"
-                />
+              <div className="details-poster-container">
 
-              ) : (
+                {selectedMovie.image ? (
 
-                <div className="details-poster">
-                  🎬
-                </div>
+                  <img
+                    src={
+                      selectedMovie.image
+                    }
+                    alt={
+                      selectedMovie.title +
+                      " poster"
+                    }
+                    className="details-poster-image"
+                  />
 
-              )}
+                ) : (
+
+                  <div className="details-poster-placeholder">
+                    🎬
+                  </div>
+
+                )}
+
+              </div>
+
+              {/* DETAILS CONTENT */}
 
               <div className="details-content">
 
-                <h2>
-                  {selectedMovie.title}
-                </h2>
-
-                {selectedMovie.year && (
-                  <p>
-                    <strong>
-                      Release Year:
-                    </strong>{" "}
-                    {selectedMovie.year}
-                  </p>
-                )}
-
-                <p>
-                  <strong>
-                    Rating:
-                  </strong>{" "}
-                  {selectedMovie.rating
-                    ? `⭐ ${selectedMovie.rating}`
-                    : "Not rated"}
+                <p className="details-label">
+                  SHOW DETAILS
                 </p>
 
-                {selectedMovie.genres &&
-                  selectedMovie.genres.length >
-                    0 && (
+                <h2>
+                  {
+                    selectedMovie.title
+                  }
+                </h2>
 
-                    <p>
-                      <strong>
-                        Genres:
-                      </strong>{" "}
-                      {selectedMovie.genres.join(
-                        ", "
-                      )}
-                    </p>
+                <div className="details-rating">
 
-                  )}
+                  <span>
+                    Rating
+                  </span>
 
-                {selectedMovie.language && (
-                  <p>
-                    <strong>
-                      Language:
-                    </strong>{" "}
-                    {selectedMovie.language}
-                  </p>
-                )}
+                  <strong>
+                    {selectedMovie.rating
+                      ? `★ ${selectedMovie.rating}`
+                      : "Not rated"}
+                  </strong>
 
-                {selectedMovie.status && (
-                  <p>
-                    <strong>
-                      Status:
-                    </strong>{" "}
-                    {selectedMovie.status}
-                  </p>
-                )}
+                </div>
 
-                {selectedMovie.runtime && (
-                  <p>
-                    <strong>
-                      Runtime:
-                    </strong>{" "}
-                    {selectedMovie.runtime} minutes
-                  </p>
-                )}
+                <p className="details-description">
+                  {selectedMovie.description ||
+                    "No description available."}
+                </p>
 
-                {selectedMovie.network && (
-                  <p>
-                    <strong>
-                      Network:
-                    </strong>{" "}
-                    {selectedMovie.network}
-                  </p>
-                )}
+                <div className="details-info">
 
-                {selectedMovie.description && (
-                  <p>
-                    <strong>
-                      Description:
-                    </strong>{" "}
-                    {selectedMovie.description}
-                  </p>
-                )}
+                  {selectedMovie.year &&
+                    selectedMovie.year !==
+                      "N/A" && (
 
-                {selectedMovie.officialSite && (
-                  <p>
-                    <strong>
-                      Official Site:
-                    </strong>{" "}
-                    <a
-                      href={
-                        selectedMovie.officialSite
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Visit official site
-                    </a>
-                  </p>
-                )}
+                      <div>
 
-                {/* CAST */}
+                        <span>
+                          Release Year
+                        </span>
 
-                {selectedMovie.cast &&
-                  selectedMovie.cast.length >
-                    0 && (
+                        <strong>
+                          {
+                            selectedMovie.year
+                          }
+                        </strong>
+
+                      </div>
+
+                    )}
+
+                  {selectedMovie.status && (
 
                     <div>
 
-                      <h3>
-                        Cast
-                      </h3>
+                      <span>
+                        Status
+                      </span>
 
-                      <div className="cast-list">
+                      <strong>
+                        {
+                          selectedMovie.status
+                        }
+                      </strong>
 
-                        {selectedMovie.cast.map(
+                    </div>
+
+                  )}
+
+                  {selectedMovie.language && (
+
+                    <div>
+
+                      <span>
+                        Language
+                      </span>
+
+                      <strong>
+                        {
+                          selectedMovie.language
+                        }
+                      </strong>
+
+                    </div>
+
+                  )}
+
+                  {selectedMovie.runtime && (
+
+                    <div>
+
+                      <span>
+                        Runtime
+                      </span>
+
+                      <strong>
+                        {
+                          selectedMovie.runtime
+                        }{" "}
+                        min
+                      </strong>
+
+                    </div>
+
+                  )}
+
+                  {selectedMovie.type && (
+
+                    <div>
+
+                      <span>
+                        Type
+                      </span>
+
+                      <strong>
+                        {
+                          selectedMovie.type
+                        }
+                      </strong>
+
+                    </div>
+
+                  )}
+
+                  {selectedMovie.network && (
+
+                    <div>
+
+                      <span>
+                        Network
+                      </span>
+
+                      <strong>
+                        {
+                          selectedMovie.network
+                        }
+                      </strong>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+                {/* GENRES */}
+
+                {selectedMovie.genres &&
+                  selectedMovie.genres
+                    .length >
+                    0 && (
+
+                    <div className="details-genres">
+
+                      <h4>
+                        Genres
+                      </h4>
+
+                      <div>
+
+                        {selectedMovie.genres.map(
                           (
-                            person,
-                            index
+                            genre
                           ) => (
 
-                            <p
-                              key={index}
+                            <span
+                              key={
+                                genre
+                              }
                             >
-                              <strong>
-                                {person.name}
-                              </strong>
-                              {" as "}
-                              {person.character}
-                            </p>
+                              {genre}
+                            </span>
 
                           )
                         )}
@@ -1200,16 +1862,56 @@ function App() {
 
                   )}
 
-                {/* CLOSE */}
+                {/* DETAILS ACTIONS */}
 
-                <button
-                  className="close-button"
-                  onClick={() =>
-                    setSelectedMovie(null)
-                  }
-                >
-                  Close Details
-                </button>
+                <div className="details-actions">
+
+                  {isInWishlist(
+                    selectedMovie.id
+                  ) ? (
+
+                    <button
+                      className="wishlist-button saved"
+                      onClick={() =>
+                        removeFromWishlist(
+                          selectedMovie.id
+                        )
+                      }
+                    >
+                      Remove from Wishlist
+                    </button>
+
+                  ) : (
+
+                    <button
+                      className="wishlist-button"
+                      onClick={() =>
+                        addToWishlist(
+                          selectedMovie
+                        )
+                      }
+                    >
+                      + Add to Wishlist
+                    </button>
+
+                  )}
+
+                  {selectedMovie.officialSite && (
+
+                    <a
+                      href={
+                        selectedMovie.officialSite
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="official-link"
+                    >
+                      Official Site
+                    </a>
+
+                  )}
+
+                </div>
 
               </div>
 
@@ -1220,6 +1922,16 @@ function App() {
         )}
 
       </main>
+
+      {/* FOOTER */}
+
+      <footer className="footer">
+
+        <p>
+          Show Discovery • Powered by TVMaze
+        </p>
+
+      </footer>
 
     </div>
   );
